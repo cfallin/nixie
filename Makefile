@@ -1,4 +1,4 @@
-OBJS = main.o dim.o dmx.o eeprom.o
+OBJS = main.o
 
 .PHONY: all
 all: dimmer.hex
@@ -16,9 +16,6 @@ dimmer.out: $(OBJS)
 	
 .PHONY: prog
 prog: dimmer.hex
-	@echo If you are on WinXP and this fails, try loading GIVEIO.sys first
-	#uisp -dlpt=0x378 -dprog=dapa --erase
-	#uisp -dlpt=0x378 -dprog=dapa --upload if=dimmer.hex
 	uisp -dprog=dapa --erase
 	uisp -dprog=dapa --upload if=dimmer.hex
 
