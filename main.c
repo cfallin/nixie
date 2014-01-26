@@ -34,16 +34,14 @@ static void check_buttons();
 static void init_smps();
 
 typedef struct {
-    char H, M, S;
-    char ticks, correction;
+    unsigned char H, M, S;
+    unsigned char ticks, correction;
 } hms_time_t;
 
 hms_time_t current_time;
 
-char debounce_H, debounce_M, debounce_S;
-char registered_H, registered_M, registered_S;
-
-char smps_dutycycle;
+unsigned char debounce_H, debounce_M, debounce_S;
+unsigned char registered_H, registered_M, registered_S;
 
 void init_time()
 {
@@ -51,9 +49,12 @@ void init_time()
     current_time.ticks = current_time.correction = 0;
     
     // set up timer 2
+    TCNT2 = 0;
     TCCR2 = 0x47; // WGM mode 2 -- CTC (reset on match); clock source prescaler/1024
     OCR2 = 249;   // for a 20MHz clock, 20 / 1024 / 250 -> 78.125 Hz timer interrupt
+    TIFR |= 0x80; // clear interrupt flag
     TIMSK |= 0x80; // enable timer 2 interrupt
+    ASSR = 0; // disable asynchronous operation (external counts)
 }
 
 ISR(TIMER2_COMP_vect)
@@ -207,9 +208,15 @@ static void init_smps()
     TCCR1A = 0x81; // COM1A[1:0] = 2 (non-inverting PWM on OC1A), WGM1[1:0] = 3 (fast PWM)
     TCCR1B = 0x1c; // WGM1[3:2] = 3 (fast PWM), CS1[2:0] = clk/256 (100kHz)
 
+    // set up OC1A (PB1) output, low by default until timer is set up
+    PORTB &= ~2;
+    DDRB |= 2;
+
     // set up ADC on voltage feedback pin
     ADMUX = 0xc0;  // 2.56V internal Vref, ADC0 (PC0) input
-    ADCSRA = 0xef; // enable, start conversion, free-running, interrupts enabled, prescaler at clk/128
+    //ADCSRA = 0xef; // enable, start conversion, free-running, interrupts enabled, prescaler at clk/128
+
+    OCR1A = 0x0800;
 }
 
 ISR(ADC_vect)
@@ -222,7 +229,7 @@ ISR(ADC_vect)
     }
     if (val < target) {
         char diff = target - val;
-        if (OCR1A < 0xff00) OCR1A += diff;
+        if (OCR1A < 0xf900) OCR1A += diff;
     }
     if (val > target) {
         char diff = val - target;
