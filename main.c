@@ -32,6 +32,7 @@ static void write_display();
 static void init_buttons();
 static void check_buttons();
 static void init_smps();
+static void adjust_smps();
 
 typedef struct {
     unsigned char H, M, S;
@@ -59,6 +60,8 @@ void init_time()
 
 ISR(TIMER2_COMP_vect)
 {
+    adjust_smps();
+
     // increment 'ticks'; after 78.125 ticks, one second has elapsed.
     // We manage the fractional part by bumping the second display at
     // 78 ticks, but keeping a fractional part that's incremented
@@ -71,11 +74,13 @@ ISR(TIMER2_COMP_vect)
         one_second();
 
         current_time.ticks = 0;
+        /*
         current_time.correction++;
         if (current_time.correction == 8) {
             current_time.correction = 0;
             current_time.ticks = 0xFF; // take an extra tick next second
         }
+        */
     }
 
     check_buttons();
@@ -108,18 +113,32 @@ void init_display()
     DDRC |= 0x38;
 }
 
+#define nop asm volatile("nop")
+
+#define pulse_nop \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
+  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;
+
 void write_digit(char digit)
 {
     char i;
     // write 10 bits out; bit `digit` is low, rest are high
-    for (i = 0; i < digit; i++) {
+    for (i = 0; i < 10; i++) {
         if (digit == i)
-            PORTC &= ~0x10; // set data low
-        else
             PORTC |= 0x10; // set data high
+        else
+            PORTC &= ~0x10; // set data low
 
         PORTC |= 0x20; // set clock high
+        pulse_nop;
         PORTC &= ~0x20; // set clock low
+        pulse_nop;
     }
 }
 
@@ -141,15 +160,17 @@ char lookup_tens[] = {
 void write_display()
 {
     write_digit(lookup_ones[current_time.S]);
-    write_digit(lookup_tens[current_time.S]);
-    write_digit(lookup_ones[current_time.M]);
-    write_digit(lookup_tens[current_time.M]);
-    write_digit(lookup_ones[current_time.H]);
-    write_digit(lookup_tens[current_time.H]);
+    //write_digit(lookup_tens[current_time.S]);
+    //write_digit(lookup_ones[current_time.M]);
+    //write_digit(lookup_tens[current_time.M]);
+    //write_digit(lookup_ones[current_time.H]);
+    //write_digit(lookup_tens[current_time.H]);
 
     // clock the latch to load new values into shift register outputs
     PORTC &= ~0x08; // active-low: set low
+    pulse_nop;
     PORTC |=  0x08; // return high
+    pulse_nop;
 }
 
 void init_buttons()
@@ -162,6 +183,8 @@ void init_buttons()
 
 void check_buttons()
 {
+    return;
+
     // check once per 78.125Hz tick. Three ticks with a '1' is sufficiently debounced
     // to register a button-press.
     
@@ -204,36 +227,39 @@ static void init_smps()
 {
     // set up PWM output to power MOSFET, initially with duty-cycle 0 (no switching)
     
+    TCNT1 = 0;
     OCR1A = 0;      // initial 16-bit PWM value
-    TCCR1A = 0x81; // COM1A[1:0] = 2 (non-inverting PWM on OC1A), WGM1[1:0] = 3 (fast PWM)
-    TCCR1B = 0x1c; // WGM1[3:2] = 3 (fast PWM), CS1[2:0] = clk/256 (100kHz)
+    TCCR1A = 0x81; // COM1A[1:0] = 0b10 (set OC1A on compare match), WGM1[1:0] = 0b11 (phase/freq-correct 8-bit PWM)
+    TCCR1B = 0x01; // WGM1[3:2] = 0b00 (see above), CS1[2:0] = clk
 
     // set up OC1A (PB1) output, low by default until timer is set up
     PORTB &= ~2;
     DDRB |= 2;
 
     // set up ADC on voltage feedback pin
-    ADMUX = 0xc0;  // 2.56V internal Vref, ADC0 (PC0) input
-    //ADCSRA = 0xef; // enable, start conversion, free-running, interrupts enabled, prescaler at clk/128
+    ADMUX = 0xe0;  // 2.56V internal Vref, ADC0 (PC0) input, left-adjust result
+    ADCSRA = 0xe7; // enable, start conversion, free-running, interrupts disabled, prescaler at clk/128
 
-    OCR1A = 0x0800;
+    OCR1A = 0xc0;
 }
 
-ISR(ADC_vect)
+char __level = 0;
+
+void adjust_smps()
 {
+    return;
+
     char val = ADCH;
     char target = 170; // 170 volts (voltage divider is 100:1; units of ADCH with 2.56V ref are 0.01V
-    if (val > 190) { // safety
+
+    if (val > 190) { // safety shutoff at 190V
         OCR1A = 0;
-        return;
     }
     if (val < target) {
-        char diff = target - val;
-        if (OCR1A < 0xf900) OCR1A += diff;
+        if (OCR1A < 0xa0) OCR1A++;
     }
     if (val > target) {
-        char diff = val - target;
-        if (OCR1A > 0) OCR1A -= diff;
+        if (OCR1A > 0) OCR1A--;
     }
 }
 
@@ -245,5 +271,5 @@ int main()
     init_smps();
     sei(); // enable interrupts
 
-    while(1); // the interrupts do the rest
+    while (1);
 }
