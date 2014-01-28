@@ -74,13 +74,11 @@ ISR(TIMER2_COMP_vect)
         one_second();
 
         current_time.ticks = 0;
-        /*
         current_time.correction++;
         if (current_time.correction == 8) {
             current_time.correction = 0;
             current_time.ticks = 0xFF; // take an extra tick next second
         }
-        */
     }
 
     check_buttons();
@@ -130,7 +128,7 @@ void write_digit(char digit)
     char i;
     // write 10 bits out; bit `digit` is low, rest are high
     for (i = 0; i < 10; i++) {
-        if (digit == i)
+        if (digit == (9 - i))
             PORTC |= 0x10; // set data high
         else
             PORTC &= ~0x10; // set data low
@@ -165,11 +163,10 @@ void write_display()
     //write_digit(lookup_tens[current_time.M]);
     //write_digit(lookup_ones[current_time.H]);
     //write_digit(lookup_tens[current_time.H]);
-
-    // clock the latch to load new values into shift register outputs
-    PORTC &= ~0x08; // active-low: set low
+    
+    PORTC |= 0x08; // set latch strobe high
     pulse_nop;
-    PORTC |=  0x08; // return high
+    PORTC &= ~0x08; // set latch strobe low
     pulse_nop;
 }
 
@@ -269,7 +266,16 @@ int main()
     init_display();
     init_buttons();
     init_smps();
+#if 1
     sei(); // enable interrupts
-
     while (1);
+
+#else
+    one_second();
+    one_second();
+    one_second();
+    current_time.S = 9;
+
+    while(1) write_display();
+#endif
 }
