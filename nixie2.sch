@@ -7009,6 +7009,8 @@ by R. Vogg  15.March.2002</description>
 <sheets>
 <sheet>
 <plain>
+<text x="27.94" y="91.44" size="7.62" layer="91">NIXIE CLOCK</text>
+<text x="-2.54" y="81.28" size="5.08" layer="91">Copyright (c) 2014 Chris Fallin &lt;cfallin@c1f.net&gt;</text>
 </plain>
 <instances>
 <instance part="IC1" gate="A" x="17.78" y="17.78" rot="R90"/>
