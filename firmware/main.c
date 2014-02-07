@@ -2,12 +2,12 @@
  * Nixie Clock
  *
  * Copyright (c) 2014 Chris Fallin <cfallin@c1f.net>
- * Placed under the modified BSD license
- *
- * main.c: main loop
+ * Placed under the GNU GPL v2.
  */
 
 /* IO connections:
+ *
+ * (NOTE: corresponds to prototype board, not manufactured PCB. To be updated!)
  *
  * PC0 (ADC0) in from 100:1 voltage divider on 170V supply
  * PB1 (OC1A) out to MOSFET on 170V supply (active high)
