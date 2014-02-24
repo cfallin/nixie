@@ -5,18 +5,23 @@
  * Placed under the GNU GPL v2.
  */
 
-/* IO connections:
+/* 
+ * Assume an ATmega16.
  *
- * (NOTE: corresponds to prototype board, not manufactured PCB. To be updated!)
+ * IO connections (manufactured board version):
  *
- * PC0 (ADC0) in from 100:1 voltage divider on 170V supply
- * PB1 (OC1A) out to MOSFET on 170V supply (active high)
- * PC4 (SDA) out to nixie cathode shift register data
- * PC5 (SCL) out to nixie cathode shift register clock
- * PC3 out to nixie cathode shift register latch (active high)
- * PD0 in from pushbutton 1 (H)
- * PD1 in from pushbutton 2 (M)
- * PD2 in from pushbutton 3 (S-clear)
+ * PD0..PD3 are BCD for H-tens digit.
+ * PD4..PD7 are BCD for H-ones digit.
+ * PC0..PC3 are BCD for M-tens digit.
+ * PC4..PC7 are BCD for M-ones digit.
+ * PA0..PA3 are BCD for S-tens digit.
+ * PA4,PA5,PA6,PB4 are BCD for S-ones digit.
+ *
+ * PB3/OC0 is gate for power MOSFET on high-voltage boost converter.
+ *
+ * PA7 is analog feedback on high-voltage bus (1/101 resistive prescaler).
+ *
+ * PB0, PB1, PB2 are pushbuttons 1, 2, 3.
  */
 
 #include <avr/io.h>
@@ -104,40 +109,16 @@ void one_second()
 
 void init_display()
 {
-    // PC3 is latch (active low), PC4 is data, PC5 is clock: 0x38 mask
-    // set latch (active low) output high for now; leave clock and data low
-    PORTC = (PORTC & ~0x38) | 0x08;
-    // all three lines are outputs
-    DDRC |= 0x38;
-}
-
-#define nop asm volatile("nop")
-
-#define pulse_nop \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; \
-  nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;
-
-void write_digit(char digit)
-{
-    char i;
-    // write 10 bits out; bit `digit` is low, rest are high
-    for (i = 0; i < 10; i++) {
-        if (digit == (9 - i))
-            PORTC |= 0x10; // set data high
-        else
-            PORTC &= ~0x10; // set data low
-
-        PORTC |= 0x20; // set clock high
-        pulse_nop;
-        PORTC &= ~0x20; // set clock low
-        pulse_nop;
-    }
+    // PD0..7, PC0..7, PA0..6, PB4 are outputs.
+    // Start out with 0b1111 on all digits (digit blanked).
+    PORTD = 0xff;
+    DDRD = 0xff;
+    PORTC = 0xff;
+    DDRC = 0xff;
+    PORTA |= 0x7f;
+    DDRA |= 0x7f;
+    PORTB |= 0x10;
+    DDRB |= 0x10;
 }
 
 char lookup_ones[] = {
@@ -157,17 +138,15 @@ char lookup_tens[] = {
 
 void write_display()
 {
-    write_digit(lookup_ones[current_time.S]);
-    //write_digit(lookup_tens[current_time.S]);
-    //write_digit(lookup_ones[current_time.M]);
-    //write_digit(lookup_tens[current_time.M]);
-    //write_digit(lookup_ones[current_time.H]);
-    //write_digit(lookup_tens[current_time.H]);
-    
-    PORTC |= 0x08; // set latch strobe high
-    pulse_nop;
-    PORTC &= ~0x08; // set latch strobe low
-    pulse_nop;
+    // Hours and minutes are straight BCD out to the decoder/driver chips.
+    // Note that ones digit of each is on high nibble rather than low nibble.
+    PORTD = (lookup_tens[current_time.H]) | (lookup_ones[current_time.H] << 4);
+    PORTC = (lookup_tens[current_time.M]) | (lookup_ones[current_time.M] << 4);
+
+    // Seconds output has MSB on PB4 rather than PA7.
+    uint8_t s = (lookup_tens[current_time.M]) | (lookup_ones[current_time.M] << 4);
+    PORTA = (PORTA & 0x80) | (s & 0x7f);
+    PORTB = (PORTB & 0xef) | ((s & 0x80) >> 3);
 }
 
 void init_buttons()
@@ -185,19 +164,19 @@ void check_buttons()
     // check once per 78.125Hz tick. Three ticks with a '1' is sufficiently debounced
     // to register a button-press.
     
-    if ((PIND & 0x01) && debounce_H < 3) // H button
+    if ((PINB & 0x01) && debounce_H < 3) // H button
         debounce_H++;
     else {
         debounce_H = 0;
         registered_H = 0;
     }
-    if ((PIND & 0x02) && debounce_M < 3) // M button
+    if ((PINB & 0x02) && debounce_M < 3) // M button
         debounce_M++;
     else {
         debounce_M = 0;
         registered_M = 0;
     }
-    if ((PIND & 0x04) && debounce_S < 3) // S-clear button
+    if ((PINB & 0x04) && debounce_S < 3) // S-clear button
         debounce_S++;
     else {
         debounce_S = 0;
@@ -222,22 +201,28 @@ void check_buttons()
 
 static void init_smps()
 {
-    // set up PWM output to power MOSFET, initially with duty-cycle 0 (no switching)
-    
-    TCNT1 = 0;
-    OCR1A = 0;      // initial 16-bit PWM value
-    TCCR1A = 0x81; // COM1A[1:0] = 0b10 (set OC1A on compare match), WGM1[1:0] = 0b11 (phase/freq-correct 8-bit PWM)
-    TCCR1B = 0x01; // WGM1[3:2] = 0b00 (see above), CS1[2:0] = clk
+    //TCCR0 = (1<<WGM00) | (1<<WGM01) | (1<<COM01) | (1<<CS00);
+    //OCR0 = 0x40;
 
-    // set up OC1A (PB1) output, low by default until timer is set up
-    PORTB &= ~2;
-    DDRB |= 2;
+    // set up OC0 (PB3) output, low by default until timer is set up
+    PORTB &= ~8;
+    DDRB |= 8;
+
+    DDRA = 0xff;
+    PORTA = 0;
+
+    while (1) {
+        PORTB |= 0x08;
+        PORTB &= ~0x08;
+        PORTA |= 1;
+        PORTA &= ~1;
+        asm volatile("nop; nop");
+    }
 
     // set up ADC on voltage feedback pin
     ADMUX = 0xe0;  // 2.56V internal Vref, ADC0 (PC0) input, left-adjust result
     ADCSRA = 0xe7; // enable, start conversion, free-running, interrupts disabled, prescaler at clk/128
 
-    OCR1A = 0xc0;
 }
 
 char __level = 0;
@@ -262,9 +247,12 @@ void adjust_smps()
 
 int main()
 {
-    init_time(); // initialize the time
-    init_display();
-    init_buttons();
+    DDRB = 1;
+    PORTB = 0;
+    while(1) { PORTB ^= 1; }
+    //init_time(); // initialize the time
+    //init_display();
+    //init_buttons();
     init_smps();
 #if 1
     sei(); // enable interrupts
